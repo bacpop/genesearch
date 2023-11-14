@@ -1,4 +1,4 @@
-from .summarise import *
+from .summarise import text_process_OpenAI, text_process_cluster_LLM
 from .search import *
 import yaml
 import importlib
@@ -7,6 +7,7 @@ import sys
 import os
 import argparse
 import logging
+import openai
 
 
 def get_options(args):
@@ -31,6 +32,14 @@ def get_options(args):
         dest="species",
         required=True,
         help="The species name.",
+        type=str)
+
+    search_opts.add_argument(
+        "--use_open_api",
+        dest="open_api",
+        action="store_true",
+        required=False,
+        help="Use OpenAI to summarise the texts, otherwise uses local LLM API",
         type=str)
 
     search_opts.add_argument("-n",
@@ -91,8 +100,7 @@ def main():
                 except yaml.YAMLError as error:
                     print(f"Error reading YAML file: {error}")
 
-    openai.api_key = apis['openai_api_key']
-
+    # Search for the gene and species
     # Define your search query
     query = f'"{args.gene}" {args.species}'
 
@@ -103,27 +111,19 @@ def main():
     texts = download_text_from_search_results(results, args.number_papers)
     texts = [text for text in texts if args.gene.lower() in " ".join(text).lower()]
 
-    # split into chuncks and recursively summarise using GPT-3
-    paper_summaries = []
-    for paper in texts:
-        paper_summaries.append(divide_and_conquer_cgpt(paper, args.gene, args.max_para))
-
-    relevant_summaries = []
-    for summary in paper_summaries:
-        if is_species(summary, args.species):
-            relevant_summaries.append(summary)
-
-    if len(relevant_summaries)>1:
-        logging.info("Merging paper summaries")
-        final_summary = divide_and_conquer_cgpt(relevant_summaries, args.gene, len(relevant_summaries))
-    elif len(relevant_summaries)==1:
-        logging.info("Only a sinlge paper has been summaried.")
-        final_summary = relevant_summaries[0]
+    # Decide on which api to use
+    if args.open_api and apis['openai_api_key'] is not None:
+        #Set the OpenAI API key
+        openai.api_key = apis['openai_api_key']
+        logging.info("Using OpenAI API")
+        text_process_OpenAI(texts, args.gene, args.species, args.max_para)
     else:
-        logging.warning("No relevant paper summaries found!")
-        sys.exit(1)
-
-    print(final_summary)
+        logging.info("Using local LLM API")
+        os.getenv('CLUSTER_API_URL', apis['cluster_api_url'])
+        os.getenv('CLUSTER_API_KEY', apis['cluster_api_key'])
+        text_process_cluster_LLM(
+            texts=texts,
+            query=query)
 
     return
 

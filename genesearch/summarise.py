@@ -83,3 +83,107 @@ def is_species(text, species):
         sys.exit(1)
 
     return None
+
+def call_cluster_llm_api(json4api)->dict|None:
+    """
+    :param json4api:
+    {
+        "query": query,
+        "texts": texts if isinstance(texts, list) else [texts],
+        "temperature": temperature,
+        "max_length": max_length,
+        "min_length": min_length,
+        "do_sample": do_sample
+    }
+    :return:
+    {"text": text,
+     "summary": text_summary,
+    "score": get_similarity_score(text_summary)}
+    """
+    import requests
+    import os
+    # Call the summariser API
+    api_url = os.getenv('CLUSTER_API_URL')
+    response = requests.post(
+        url=f"{api_url}/summarise",
+        headers=['accept: application/json', 'Content-Type: application/json'],
+        json=json4api
+    )
+
+    # Check if the request was successful
+    if response.status_code == 200:
+        # Parse the JSON response
+        return response.json()
+    else:
+        logging.error(f"Request failed with status code {response.status_code}")
+        return None
+
+
+def text_process_cluster_LLM(
+        texts:str|list,
+        query:str,
+        temperature:float=0.2,
+        max_length:int=150,
+        min_length:int=100,
+        do_sample:bool=None,
+        similarity_threshold:float=0.5
+):
+    import sys
+    response_json = call_cluster_llm_api({
+        "query": query,
+        "texts": texts if isinstance(texts, list) else [texts],
+        "temperature": temperature,
+        "max_length": max_length,
+        "min_length": min_length,
+        "do_sample": do_sample
+    })
+
+    relevant_summaries = [text_sum_dict["summary"] for text_sum_dict in response_json if text_sum_dict["score"] >= similarity_threshold]
+
+    if len(relevant_summaries) > 1:
+        logging.info("Merging paper summaries")
+        final_summary = call_cluster_llm_api(
+            {
+                "query": query,
+                "texts": [' '.join(relevant_summaries)],
+                "temperature": temperature,
+                "max_length": max_length,
+                "min_length": min_length,
+                "do_sample": do_sample
+            }
+        )
+
+    elif len(relevant_summaries) == 1:
+        logging.info("Only a single paper has been summarised.")
+        final_summary = relevant_summaries[0]
+    else:
+        logging.warning("No relevant paper summaries found!")
+        sys.exit(1)
+
+    print(final_summary)
+    return final_summary
+
+
+def text_process_OpenAI(texts, gene, species, max_para):
+    import sys
+    # split into chuncks and recursively summarise using GPT-3
+    paper_summaries = []
+    for paper in texts:
+        paper_summaries.append(divide_and_conquer_cgpt(paper, gene, max_para))
+
+    relevant_summaries = []
+    for summary in paper_summaries:
+        if is_species(summary, species):
+            relevant_summaries.append(summary)
+
+    if len(relevant_summaries) > 1:
+        logging.info("Merging paper summaries")
+        final_summary = divide_and_conquer_cgpt(relevant_summaries, gene, len(relevant_summaries))
+    elif len(relevant_summaries) == 1:
+        logging.info("Only a single paper has been summarised.")
+        final_summary = relevant_summaries[0]
+    else:
+        logging.warning("No relevant paper summaries found!")
+        sys.exit(1)
+
+    print(final_summary)
