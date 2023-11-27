@@ -23,7 +23,8 @@ def call_google_search_api(api_key, engine_id, query):
         return None
 
 
-def download_text_from_url(url, min_word_count=100):
+def download_text_from_url(url, min_word_count=20):
+    ## TODO: Enhance it to download sections of the paper
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0"
@@ -32,13 +33,15 @@ def download_text_from_url(url, min_word_count=100):
         if response.status_code == 200:
             soup = BeautifulSoup(response.content, "html.parser")
             paragraphs = soup.find_all("p")
-            long_paragraphs = []
+            #long_paragraphs = []
+            long_paragraphs = ''
             for paragraph in paragraphs:
                 text = paragraph.get_text()
                 word_count = len(text.split())
 
                 if word_count >= min_word_count:
-                    long_paragraphs.append(text)
+                    #long_paragraphs.append(text)
+                    long_paragraphs += text
 
             return long_paragraphs
         else:

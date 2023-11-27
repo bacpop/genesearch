@@ -1,5 +1,6 @@
 import openai
 import logging
+import sys
 
 
 def call_openai_chat_api(prompt, model="gpt-3.5-turbo"):
@@ -84,7 +85,8 @@ def is_species(text, species):
 
     return None
 
-def call_cluster_llm_api(json4api)->dict|None:
+
+def call_cluster_llm_api(json4api, api_url)->dict|None:
     """
     :param json4api:
     {
@@ -98,16 +100,14 @@ def call_cluster_llm_api(json4api)->dict|None:
     :return:
     {"text": text,
      "summary": text_summary,
-    "score": get_similarity_score(text_summary)}
+    "query_similarity_score": get_similarity_score(text_summary)}
     """
     import requests
-    import os
     # Call the summariser API
-    api_url = os.getenv('CLUSTER_API_URL')
     response = requests.post(
         url=f"{api_url}/summarise",
-        headers=['accept: application/json', 'Content-Type: application/json'],
-        json=json4api
+        headers={'accept':'application/json', 'Content-Type':'application/json'},
+        data=json4api,
     )
 
     # Check if the request was successful
@@ -122,14 +122,17 @@ def call_cluster_llm_api(json4api)->dict|None:
 def text_process_cluster_LLM(
         texts:str|list,
         query:str,
+        api_url:str,
         temperature:float=0.2,
         max_length:int=150,
         min_length:int=100,
         do_sample:bool=None,
-        similarity_threshold:float=0.5
+        similarity_threshold:float=0.0,
+        re_summarise:bool=False
 ):
-    import sys
-    response_json = call_cluster_llm_api({
+    import json
+
+    json4api = json.dumps({
         "query": query,
         "texts": texts if isinstance(texts, list) else [texts],
         "temperature": temperature,
@@ -137,30 +140,32 @@ def text_process_cluster_LLM(
         "min_length": min_length,
         "do_sample": do_sample
     })
+    response_json = call_cluster_llm_api(json4api, api_url)
 
-    relevant_summaries = [text_sum_dict["summary"] for text_sum_dict in response_json if text_sum_dict["score"] >= similarity_threshold]
+    relevant_summaries = [text_sum_dict["summary"] for text_sum_dict in response_json if text_sum_dict["query_similarity_score"] >= similarity_threshold]
 
-    if len(relevant_summaries) > 1:
-        logging.info("Merging paper summaries")
-        final_summary = call_cluster_llm_api(
-            {
-                "query": query,
-                "texts": [' '.join(relevant_summaries)],
-                "temperature": temperature,
-                "max_length": max_length,
-                "min_length": min_length,
-                "do_sample": do_sample
-            }
-        )
+    #### API summariser does this already
+    # if len(relevant_summaries) > 1:
+    #     logging.info("Merging paper summaries")
+    #     final_summary = call_cluster_llm_api(
+    #         json.dumps({
+    #             "query": query,
+    #             "texts": [' '.join(summary) for summary in relevant_summaries],
+    #             "temperature": temperature,
+    #             "max_length": max_length,
+    #             "min_length": min_length,
+    #             "do_sample": do_sample
+    #         }), api_url
+    #     )
+    #
+    # elif len(relevant_summaries) == 1:
+    #     logging.info("Only a single paper has been summarised.")
+    #     final_summary = relevant_summaries[0]
+    # else:
+    #     logging.warning("No relevant paper summaries found!")
+    #     sys.exit(1)
+    final_summary = relevant_summaries[-1]
 
-    elif len(relevant_summaries) == 1:
-        logging.info("Only a single paper has been summarised.")
-        final_summary = relevant_summaries[0]
-    else:
-        logging.warning("No relevant paper summaries found!")
-        sys.exit(1)
-
-    print(final_summary)
     return final_summary
 
 
@@ -186,4 +191,18 @@ def text_process_OpenAI(texts, gene, species, max_para):
         logging.warning("No relevant paper summaries found!")
         sys.exit(1)
 
-    print(final_summary)
+    return final_summary
+
+
+def write_summary(summary, output_file):
+    if isinstance(summary, dict):
+        final_summary_text = summary["summary"]
+    elif isinstance(summary, list):
+        final_summary_text = summary[0]["summary"]
+    elif isinstance(summary, str):
+        final_summary_text = summary
+    else:
+        logging.warning("Unexpected summary format")
+        final_summary_text = summary
+    with open(output_file, 'w') as f:
+        print(final_summary_text, file=f)

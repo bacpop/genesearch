@@ -1,4 +1,4 @@
-from .summarise import text_process_OpenAI, text_process_cluster_LLM
+from .summarise import text_process_OpenAI, text_process_cluster_LLM, write_summary
 from .search import *
 import yaml
 import importlib
@@ -40,7 +40,7 @@ def get_options(args):
         action="store_true",
         required=False,
         help="Use OpenAI to summarise the texts, otherwise uses local LLM API",
-        type=str)
+        )
 
     search_opts.add_argument("-n",
                          "--num-papers",
@@ -67,9 +67,6 @@ def get_options(args):
 
     args = parser.parse_args(args)
     return (args)
-
-
-
 
 
 def main():
@@ -109,24 +106,25 @@ def main():
 
     # Download the text of the first 10 results
     texts = download_text_from_search_results(results, args.number_papers)
-    texts = [text for text in texts if args.gene.lower() in " ".join(text).lower()]
+    #texts = [text for text in texts if args.gene.lower() in " ".join(text).lower()]
 
     # Decide on which api to use
     if args.open_api and apis['openai_api_key'] is not None:
         #Set the OpenAI API key
         openai.api_key = apis['openai_api_key']
         logging.info("Using OpenAI API")
-        text_process_OpenAI(texts, args.gene, args.species, args.max_para)
+        final_summary = text_process_OpenAI(texts, args.gene, args.species, args.max_para)
     else:
         logging.info("Using local LLM API")
-        os.getenv('CLUSTER_API_URL', apis['cluster_api_url'])
-        os.getenv('CLUSTER_API_KEY', apis['cluster_api_key'])
-        text_process_cluster_LLM(
+        final_summary = text_process_cluster_LLM(
             texts=texts,
-            query=query)
+            query=query,
+            api_url=os.getenv('CLUSTER_API_URL', apis['cluster_api_url']),
+        )
+
+    write_summary(final_summary, f"{args.gene}_{args.species}.txt")
 
     return
-
 
 
 if __name__ == '__main__':
